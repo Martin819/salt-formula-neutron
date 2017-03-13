@@ -13,12 +13,12 @@ neutron:
     local_ip: 10.1.0.110
     message_queue:
       engine: rabbitmq
-      host: 172.16.10.254
+      host: 127.0.0.1
       password: workshop
       port: 5672
       user: openstack
       virtual_host: /openstack
     metadata:
-      host: 172.16.10.254
+      host: 127.0.0.1
       password: password
     version: mitaka

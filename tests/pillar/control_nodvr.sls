@@ -11,14 +11,14 @@ neutron:
       address: 172.16.10.101
       port: 9696
     compute:
-      host: 172.16.10.254
+      host: 127.0.0.1
       password: workshop
       region: RegionOne
       tenant: service
       user: nova
     database:
       engine: mysql
-      host: 172.16.10.254
+      host: 127.0.0.1
       name: neutron
       password: workshop
       port: 3306
@@ -29,7 +29,7 @@ neutron:
     global_physnet_mtu: 1500
     identity:
       engine: keystone
-      host: 172.16.10.254
+      host: 127.0.0.1
       password: workshop
       port: 35357
       region: RegionOne
@@ -38,7 +38,7 @@ neutron:
     l3_ha: True
     message_queue:
       engine: rabbitmq
-      host: 172.16.10.254
+      host: 127.0.0.1
       password: workshop
       port: 5672
       user: openstack
