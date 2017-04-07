@@ -38,7 +38,7 @@ neutron_sriov_service:
     - file: /etc/neutron/neutron.conf
     - file: /etc/neutron/plugins/ml2/openvswitch_agent.ini
     - file: /etc/neutron/plugins/ml2/sriov_agent.ini
-  - unless grains.get('noservices', False)
+  - unless: grains.get('noservices', False)
 
 {% endif %}
 
