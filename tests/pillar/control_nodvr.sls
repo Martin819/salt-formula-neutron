@@ -1,5 +1,8 @@
 neutron:
   server:
+    api_workers: 2
+    rpc_workers: 2
+    rpc_state_report_workers: 2
     backend:
       engine: ml2
       external_mtu: 1500
@@ -44,7 +47,6 @@ neutron:
       port: 5672
       user: openstack
       virtual_host: /openstack
-    plugin: ml2
     version: mitaka
     policy:
       create_subnet: 'rule:admin_or_network_owner'

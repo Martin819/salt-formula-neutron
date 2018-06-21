@@ -1,4 +1,4 @@
-{%- from "neutron/map.jinja" import server with context %}
+{%- from "neutron/map.jinja" import fwaas, server with context %}
 [DEFAULT]
 
 #
@@ -39,13 +39,22 @@ api_extensions_path = extensions:/usr/lib/python2.7/dist-packages/neutron_plugin
 core_plugin = neutron_plugin_contrail.plugins.opencontrail.contrail_plugin.NeutronPluginContrailCoreV2
 
 service_plugins = neutron_plugin_contrail.plugins.opencontrail.loadbalancer.v2.plugin.LoadBalancerPluginV2
-{% elif server.backend.engine == "ml2" %}
+
+{% elif server.backend.engine in ["ml2", "ovn"] %}
 
 core_plugin = neutron.plugins.ml2.plugin.Ml2Plugin
 
-service_plugins =neutron.services.l3_router.l3_router_plugin.L3RouterPlugin,neutron.services.metering.metering_plugin.MeteringPlugin,trunk{%- if server.lbaas is defined -%}
-,neutron_lbaas.services.loadbalancer.plugin.LoadBalancerPluginv2
-{%- endif -%}
+{% if server.backend.engine == "ml2" %}
+{% set l3_plugin = 'neutron.services.l3_router.l3_router_plugin.L3RouterPlugin' %}
+{% elif server.backend.engine == "ovn" %}
+{% set l3_plugin = 'networking_ovn.l3.l3_ovn.OVNL3RouterPlugin' %}
+{% endif %}
+
+service_plugins ={{ l3_plugin }}, neutron.services.metering.metering_plugin.MeteringPlugin
+{%- if server.lbaas is defined -%},lbaasv2{%- endif -%}
+{%- if fwaas.get('enabled', False) -%},{{ fwaas[fwaas.api_version]['service_plugin'] }}{%- endif -%}
+{%- if server.get('qos', 'True') -%},neutron.services.qos.qos_plugin.QoSPlugin{%- endif -%}
+{%- if server.get('vlan_aware_vms', False) -%},trunk{%- endif -%}
 
 {% endif %}
 
@@ -109,6 +118,9 @@ dns_domain = {{ server.dns_domain }}
 
 # Driver for external DNS integration. (string value)
 #external_dns_driver = <None>
+{%- if server.backend.get('extension', {}).get('dns', {}).get('enabled', False) %}
+external_dns_driver={{ server.backend.get('extension', {}).get('dns', {}).get('engine', '') }}
+{%- endif %}
 
 # Allow sending resource operation notification to DHCP agent (boolean value)
 #dhcp_agent_notification = true
@@ -175,13 +187,27 @@ global_physnet_mtu = {{ server.get('global_physnet_mtu', '1500') }}
 # default is equal to the number of CPUs available for best performance.
 # (integer value)
 #api_workers = <None>
+{%- if server.api_workers is defined %}
+api_workers = {{ server.api_workers }}
+{%- endif %}
 
 # Number of RPC worker processes for service. (integer value)
 #rpc_workers = 1
+{%- if server.rpc_workers is defined %}
+rpc_workers = {{ server.rpc_workers }}
+{%- else %}
+rpc_workers = {{ grains.num_cpus }}
+{%- endif %}
+
 
 # Number of RPC worker processes dedicated to state reports queue. (integer
 # value)
 #rpc_state_report_workers = 1
+{%- if server.rpc_state_report_workers is defined %}
+rpc_state_report_workers = {{ server.rpc_state_report_workers }}
+{%- else %}
+rpc_state_report_workers = 4
+{%- endif %}
 
 # Range of seconds to randomly delay when starting the periodic task scheduler
 # to reduce stampeding. (Disable by setting to 0) (integer value)
@@ -288,6 +314,7 @@ router_scheduler_driver = neutron.scheduler.l3_agent_scheduler.ChanceScheduler
 # Automatically reschedule routers from offline L3 agents to online L3 agents.
 # (boolean value)
 #allow_automatic_l3agent_failover = false
+allow_automatic_l3agent_failover = true
 
 # Enable HA mode for virtual routers. (boolean value)
 #l3_ha = false
@@ -296,6 +323,7 @@ l3_ha = {{ server.get('l3_ha', 'False') }}
 # Maximum number of L3 agents which a HA router will be scheduled on. If it is
 # set to 0 then the router will be scheduled on every agent. (integer value)
 #max_l3_agents_per_router = 3
+max_l3_agents_per_router = 0
 
 # Subnet used for the l3 HA admin network. (string value)
 #l3_ha_net_cidr = 169.254.192.0/18
@@ -603,19 +631,21 @@ executor_thread_pool_size = 70
 
 # Seconds to wait for a response from a call. (integer value)
 #rpc_response_timeout = 60
-rpc_response_timeout=60
+rpc_response_timeout=120
 
 # A URL representing the messaging driver to use and its full configuration.
 # (string value)
 #transport_url = <None>
+
+{%- set rabbit_port = server.message_queue.get('port', 5671 if server.message_queue.get('ssl',{}).get('enabled', False)  else 5672) %}
 {%- if server.message_queue.members is defined %}
 transport_url = rabbit://{% for member in server.message_queue.members -%}
-                             {{ server.message_queue.user }}:{{ server.message_queue.password }}@{{ member.host }}:{{ member.get('port', 5672) }}
+                             {{ server.message_queue.user }}:{{ server.message_queue.password }}@{{ member.host }}:{{ member.get('port',rabbit_port) }}
                              {%- if not loop.last -%},{%- endif -%}
                          {%- endfor -%}
                              /{{ server.message_queue.virtual_host }}
 {%- else %}
-transport_url = rabbit://{{ server.message_queue.user }}:{{ server.message_queue.password }}@{{ server.message_queue.host }}:{{ server.message_queue.port }}/{{ server.message_queue.virtual_host }}
+transport_url = rabbit://{{ server.message_queue.user }}:{{ server.message_queue.password }}@{{ server.message_queue.host }}:{{ rabbit_port }}/{{ server.message_queue.virtual_host }}
 {%- endif %}
 
 # DEPRECATED: The messaging driver to use, defaults to rabbit. Other drivers
@@ -624,7 +654,6 @@ transport_url = rabbit://{{ server.message_queue.user }}:{{ server.message_queue
 # Its value may be silently ignored in the future.
 # Reason: Replaced by [DEFAULT]/transport_url
 #rpc_backend = rabbit
-rpc_backend = rabbit
 
 # The default exchange under which topics are scoped. May be overridden by an
 # exchange name specified in the transport_url option. (string value)
@@ -686,7 +715,7 @@ root_helper = sudo /usr/bin/neutron-rootwrap /etc/neutron/rootwrap.conf
 # needs to execute commands in Dom0 in the hypervisor of XenServer, this item
 # should be set to 'xenapi_root_helper', so that it will keep a XenAPI session
 # to pass commands to Dom0. (string value)
-#root_helper_daemon = <None>
+root_helper_daemon = sudo neutron-rootwrap-daemon /etc/neutron/rootwrap.conf
 
 # Seconds between nodes reporting state to server; should be less than
 # agent_down_time, best if it is half or less than agent_down_time. (floating
@@ -831,8 +860,9 @@ allow_headers = {{ server.cors.allow_headers }}
 # Deprecated group/name - [DEFAULT]/sql_connection
 # Deprecated group/name - [DATABASE]/sql_connection
 # Deprecated group/name - [sql]/connection
-{% if server.backend.engine == "ml2" %}
-connection = {{ server.database.engine }}+pymysql://{{ server.database.user }}:{{ server.database.password }}@{{ server.database.host }}/{{ server.database.name }}?charset=utf8
+
+{% if server.backend.engine in ["ml2", "ovn"] %}
+connection = {{ server.database.engine }}+pymysql://{{ server.database.user }}:{{ server.database.password }}@{{ server.database.host }}/{{ server.database.name }}?charset=utf8{%- if server.database.get('ssl',{}).get('enabled',False) %}&ssl_ca={{ server.database.ssl.get('cacert_file', server.cacert_file) }}{% endif %}
 {% else %}
 connection = sqlite:////var/lib/neutron/neutron.sqlite
 {% endif %}
@@ -863,7 +893,7 @@ idle_timeout = 3600
 # Deprecated group/name - [DEFAULT]/sql_max_pool_size
 # Deprecated group/name - [DATABASE]/sql_max_pool_size
 #max_pool_size = 5
-max_pool_size = 20
+max_pool_size = {{ [grains.num_cpus * 5, 30] | sort | first }}
 
 # Maximum number of database connection retries during startup. Set to -1 to
 # specify an infinite retry count. (integer value)
@@ -937,8 +967,11 @@ project_domain_id = {{ server.identity.get('domain', 'default') }}
 project_name = {{ server.identity.tenant }}
 username = {{ server.identity.user }}
 password = {{ server.identity.password }}
-auth_uri=http://{{ server.identity.host }}:5000
-auth_url=http://{{ server.identity.host }}:35357
+auth_uri={{ server.identity.get('protocol', 'http') }}://{{ server.identity.host }}:5000
+auth_url={{ server.identity.get('protocol', 'http') }}://{{ server.identity.host }}:35357
+{%- if server.identity.get('protocol', 'http') == 'https' %}
+cafile={{ server.identity.get('cacert_file', server.cacert_file) }}
+{%- endif %}
 {%- if server.cache is defined %}
 memcached_servers={%- for member in server.cache.members %}{{ member.host }}:11211{% if not loop.last %},{% endif %}{%- endfor %}
 {%- endif %}
@@ -1227,7 +1260,10 @@ project_name = {{ server.identity.tenant }}
 password = {{ server.compute.password }}
 username = {{ server.compute.user }}
 auth_type = password
-auth_url = http://{{ server.identity.host }}:35357
+auth_url = {{ server.identity.get('protocol', 'http') }}://{{ server.identity.host }}:35357
+{%- if server.identity.get('protocol', 'http') == 'https' %}
+cafile={{ server.identity.get('cacert_file', server.cacert_file) }}
+{%- endif %}
 
 # Authentication type to load (string value)
 # Deprecated group/name - [nova]/auth_plugin
@@ -1599,6 +1635,18 @@ driver = messagingv2
 # From oslo.messaging
 #
 
+{%- if server.message_queue.get('ssl',{}).get('enabled', False) %}
+rabbit_use_ssl=true
+
+{%- if server.message_queue.ssl.version is defined %}
+kombu_ssl_version = {{ server.message_queue.ssl.version }}
+{%- elif salt['grains.get']('pythonversion') > [2,7,8] %}
+kombu_ssl_version = TLSv1_2
+{%- endif %}
+
+kombu_ssl_ca_certs = {{ server.message_queue.ssl.get('cacert_file', server.cacert_file) }}
+{%- endif %}
+
 # Use durable queues in AMQP. (boolean value)
 # Deprecated group/name - [DEFAULT]/amqp_durable_queues
 # Deprecated group/name - [DEFAULT]/rabbit_durable_queues
@@ -1721,7 +1769,6 @@ rabbit_retry_backoff = 2
 # This option is deprecated for removal.
 # Its value may be silently ignored in the future.
 #rabbit_max_retries = 0
-rabbit_max_retries = 0
 
 # Try to use HA queues in RabbitMQ (x-ha-policy: all). If you change this
 # option, you must wipe the RabbitMQ database. In RabbitMQ 3.0, queue mirroring
@@ -2160,10 +2207,24 @@ quota_driver = neutron_plugin_contrail.plugins.opencontrail.quota.driver.QuotaDr
 
 {%- for lbaas_name, lbaas in server.lbaas.providers.iteritems() %}
 
-{%- if lbaas.engine == "avinetworks" -%}
 service_provider=LOADBALANCERV2:{{ lbaas_name }}:{{ lbaas.get('driver_path', 'avi_lbaasv2.avi_driver.AviDriver') }}:default
 
 [{{ lbaas_name }}]
+
+{% if lbaas.engine == "octavia" %}
+
+base_url = {{ lbaas.base_url }}
+request_poll_timeout = 3000
+
+[service_auth]
+auth_version = 2
+admin_password = {{ server.identity.password }}
+admin_user = {{ server.identity.user }}
+admin_tenant_name = {{ server.identity.tenant }}
+auth_url = http://{{ server.identity.host }}:35357/v2.0
+{%- endif -%}
+
+{% if lbaas.engine == "avinetworks" %}
 address={{ lbaas.controller_address }}
 user={{ lbaas.controller_user }}
 password={{ lbaas.controller_password }}
@@ -2181,3 +2242,20 @@ service_provider = LOADBALANCERV2:Opencontrail:neutron_plugin_contrail.plugins.o
 {% include "neutron/files/"+server.version+"/ContrailPlugin.ini" %}
 
 {% endif %}
+
+{%- if server.backend.get('extension', {}).get('dns', {}).get('enabled', False) and server.backend.get('extension', {}).get('dns', {}).get('engine', '') == 'designate' %}
+[designate]
+{%- if server.backend.get('extension', {}).get('dns', {}).get('url', False) %}
+url = {{ server.backend.extension.dns.url }}
+{%- else %}
+#url = <None>
+{%- endif %}
+auth_region={{ server.identity.region }}
+auth_type = password
+user_domain_id = {{ server.identity.get('domain', 'default') }}
+project_domain_id = {{ server.identity.get('domain', 'default') }}
+project_name = {{ server.identity.tenant }}
+username = {{ server.identity.user }}
+password = {{ server.identity.password }}
+auth_url=http://{{ server.identity.host }}:35357
+{%- endif %}

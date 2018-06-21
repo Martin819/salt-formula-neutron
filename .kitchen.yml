@@ -8,7 +8,7 @@ provisioner:
   name: salt_solo
   salt_install: bootstrap
   salt_bootstrap_url: https://bootstrap.saltstack.com
-  salt_version: latest
+  salt_version: <%=ENV['SALT_VERSION'] || 'latest'%>
   require_chef: false
   log_level: error
   formula: neutron
@@ -46,9 +46,9 @@ verifier:
   sudo: true
 
 platforms:
-  - name: <%=ENV['PLATFORM'] || 'ubuntu-xenial'%>
+  - name: <%=ENV['PLATFORM'] || 'saltstack-ubuntu-xenial-salt-stable'%>
     driver_config:
-      image: <%=ENV['PLATFORM'] || 'trevorj/salty-whales:xenial'%>
+      image: <%=ENV['PLATFORM'] || 'epcim/salt-formulas:saltstack-ubuntu-xenial-salt-stable'%>
       platform: ubuntu
 
 suites:
@@ -62,6 +62,11 @@ suites:
     provisioner:
       pillars-from-files:
         neutron.sls: tests/pillar/compute_dvr.sls
+
+  - name: compute_dvr_fwaas_v1
+    provisioner:
+      pillars-from-files:
+        neutron.sls: tests/pillar/compute_dvr_fwaas_v1.sls
 
   - name: compute_legacy
     provisioner:
@@ -78,6 +83,26 @@ suites:
       pillars-from-files:
         neutron.sls: tests/pillar/compute_sriov.sls
 
+  - name: compute_qos_sriov
+    provisioner:
+      pillars-from-files:
+        neutron.sls: tests/pillar/compute_qos_sriov.sls
+
+  - name: compute_qos
+    provisioner:
+      pillars-from-files:
+        neutron.sls: tests/pillar/compute_qos.sls
+
+  - name: compute_ovn
+    provisioner:
+      pillars-from-files:
+        neutron.sls: tests/pillar/compute_ovn.sls
+
+  - name: compute_bgpvpn
+    provisioner:
+      pillars-from-files:
+        neutron.sls: tests/pillar/compute_bgpvpn.sls
+
   - name: control_cluster
     provisioner:
       pillars-from-files:
@@ -93,10 +118,45 @@ suites:
       pillars-from-files:
         neutron.sls: tests/pillar/control_nodvr.sls
 
+  - name: control_lbaas_octavia
+    provisioner:
+      pillars-from-files:
+        neutron.sls: tests/pillar/control_lbaas_octavia.sls
+
+  - name: control_fwaas_v1
+    provisioner:
+      pillars-from-files:
+        neutron.sls: tests/pillar/control_fwaas_v1.sls
+
+  - name: control_l2gw
+    provisioner:
+      pillars-from-files:
+        neutron.sls: tests/pillar/control_l2gw.sls
+
+  - name: control_opendaylight
+    provisioner:
+      pillars-from-files:
+        neutron.sls: tests/pillar/control_opendaylight.sls
+
   - name: control_single
     provisioner:
       pillars-from-files:
         neutron.sls: tests/pillar/control_single.sls
+
+  - name: control_qos
+    provisioner:
+      pillars-from-files:
+        neutron.sls: tests/pillar/control_qos.sls
+
+  - name: control_ovn
+    provisioner:
+      pillars-from-files:
+        neutron.sls: tests/pillar/control_ovn.sls
+
+  - name: control_bgpvpn
+    provisioner:
+      pillars-from-files:
+        neutron.sls: tests/pillar/control_bgpvpn.sls
 
   - name: gateway_dvr
     provisioner:
@@ -107,4 +167,30 @@ suites:
     provisioner:
       pillars-from-files:
         neutron.sls: tests/pillar/gateway_legacy.sls
+
+  - name: gateway_qos
+    provisioner:
+      pillars-from-files:
+        neutron.sls: tests/pillar/gateway_qos.sls
+
+  - name: gateway_legacy_fwaas_v1
+    provisioner:
+      pillars-from-files:
+        neutron.sls: tests/pillar/gateway_legacy_fwaas_v1.sls
+
+  - name: gateway_legacy_l2gw
+    provisioner:
+      pillars-from-files:
+        neutron.sls: tests/pillar/gateway_legacy_l2gw.sls
+
+  - name: gateway_legacy_opendaylight
+    provisioner:
+      pillars-from-files:
+        neutron.sls: tests/pillar/gateway_legacy_opendaylight.sls
+
+  - name: control_dns
+    provisioner:
+      pillars-from-files:
+        neutron.sls: tests/pillar/control_dns.sls
+
 # vim: ft=yaml sw=2 ts=2 sts=2 tw=125

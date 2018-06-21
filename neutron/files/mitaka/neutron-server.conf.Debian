@@ -1,4 +1,5 @@
-{%- from "neutron/map.jinja" import server with context %}
+{%- from "neutron/map.jinja" import fwaas, server with context %}
+
 [DEFAULT]
 
 #
@@ -37,9 +38,9 @@ service_plugins = neutron_plugin_contrail.plugins.opencontrail.loadbalancer.v2.p
 
 core_plugin = neutron.plugins.ml2.plugin.Ml2Plugin
 
-service_plugins =neutron.services.l3_router.l3_router_plugin.L3RouterPlugin,neutron.services.metering.metering_plugin.MeteringPlugin{%- if server.lbaas is defined -%}
-,neutron_lbaas.services.loadbalancer.plugin.LoadBalancerPluginv2
-{%- endif -%}
+service_plugins =neutron.services.l3_router.l3_router_plugin.L3RouterPlugin,neutron.services.metering.metering_plugin.MeteringPlugin
+{%- if server.lbaas is defined -%},neutron_lbaas.services.loadbalancer.plugin.LoadBalancerPluginv2{%- endif -%}
+{%- if fwaas.get('enabled', False) -%},{{ fwaas[fwaas.api_version]['service_plugin'] }}{%- endif -%}
 
 {% endif %}
 
@@ -214,13 +215,26 @@ global_physnet_mtu = {{ server.get('global_physnet_mtu', '1500') }}
 # default is equal to the number of CPUs available for best performance.
 # (integer value)
 #api_workers = <None>
+{%- if server.api_workers is defined %}
+api_workers = {{ server.api_workers }}
+{%- endif %}
 
 # Number of RPC worker processes for service (integer value)
 #rpc_workers = 1
+{%- if server.rpc_workers is defined %}
+rpc_workers = {{ server.rpc_workers }}
+{%- else %}
+rpc_workers = {{ grains.num_cpus }}
+{%- endif %}
 
 # Number of RPC worker processes dedicated to state reports queue (integer
 # value)
 #rpc_state_report_workers = 1
+{%- if server.rpc_state_report_workers is defined %}
+rpc_state_report_workers = {{ server.rpc_state_report_workers }}
+{%- else %}
+rpc_state_report_workers = 4
+{%- endif %}
 
 # Range of seconds to randomly delay when starting the periodic task scheduler
 # to reduce stampeding. (Disable by setting to 0) (integer value)
@@ -332,6 +346,7 @@ router_scheduler_driver = neutron.scheduler.l3_agent_scheduler.ChanceScheduler
 # Automatically reschedule routers from offline L3 agents to online L3 agents.
 # (boolean value)
 #allow_automatic_l3agent_failover = false
+allow_automatic_l3agent_failover = true
 
 # Enable HA mode for virtual routers. (boolean value)
 #l3_ha = false
@@ -340,6 +355,7 @@ l3_ha = {{ server.get('l3_ha', 'False') }}
 # Maximum number of L3 agents which a HA router will be scheduled on. If it is
 # set to 0 then the router will be scheduled on every agent. (integer value)
 #max_l3_agents_per_router = 3
+max_l3_agents_per_router = 0
 
 # Minimum number of L3 agents which a HA router will be scheduled on. If it is
 # set to 0 then the router will be scheduled on every agent. (integer value)
@@ -541,7 +557,7 @@ executor_thread_pool_size = 70
 
 # Seconds to wait for a response from a call. (integer value)
 #rpc_response_timeout = 60
-rpc_response_timeout=60
+rpc_response_timeout=120
 
 # A URL representing the messaging driver to use and its full configuration. If
 # not set, we fall back to the rpc_backend option and driver specific
@@ -609,7 +625,7 @@ root_helper = sudo /usr/bin/neutron-rootwrap /etc/neutron/rootwrap.conf
 #use_helper_for_ns_read = true
 
 # Root helper daemon application to use when possible. (string value)
-#root_helper_daemon = <None>
+root_helper_daemon = sudo neutron-rootwrap-daemon /etc/neutron/rootwrap.conf
 
 # Seconds between nodes reporting state to server; should be less than
 # agent_down_time, best if it is half or less than agent_down_time. (floating
@@ -745,7 +761,7 @@ allow_headers = {{ server.cors.allow_headers }}
 # Deprecated group/name - [DATABASE]/sql_connection
 # Deprecated group/name - [sql]/connection
 {% if server.backend.engine == "ml2" %}
-connection = {{ server.database.engine }}+pymysql://{{ server.database.user }}:{{ server.database.password }}@{{ server.database.host }}/{{ server.database.name }}
+connection = {{ server.database.engine }}+pymysql://{{ server.database.user }}:{{ server.database.password }}@{{ server.database.host }}/{{ server.database.name }}{%- if server.database.get('ssl',{}).get('enabled',False) %}?ssl_ca={{ server.database.ssl.get('cacert_file', server.cacert_file) }}{% endif %}
 {% else %}
 connection = sqlite:////var/lib/neutron/neutron.sqlite
 {% endif %}
@@ -775,7 +791,7 @@ idle_timeout = 3600
 # Deprecated group/name - [DEFAULT]/sql_max_pool_size
 # Deprecated group/name - [DATABASE]/sql_max_pool_size
 #max_pool_size = <None>
-max_pool_size = 20
+max_pool_size = {{ [grains.num_cpus * 5, 30] | sort | first }}
 
 # Maximum number of database connection retries during startup. Set to -1 to
 # specify an infinite retry count. (integer value)
@@ -840,7 +856,7 @@ auth_region={{ server.identity.region }}
 auth_protocol=http
 revocation_cache_time = 10
 {% if server.backend.engine == "contrail" %}
-# LBaaS contrail neutron plugin for versions 3.x expects auth_type to be 
+# LBaaS contrail neutron plugin for versions 3.x expects auth_type to be
 # 'keystone' or 'noauth'
 # This behaviour is fixed after the release MCP1.0 by using auth_strategy
 # instead of auth_type, until this is backported to MCP1.0 auth_type must be
@@ -1361,14 +1377,27 @@ driver = messagingv2
 # Deprecated group/name - [DEFAULT]/rabbit_hosts
 #rabbit_hosts = $rabbit_host:$rabbit_port
 #
+{%- set rabbit_port = server.message_queue.get('port', 5671 if server.message_queue.get('ssl',{}).get('enabled', False)  else 5672) %}
 {%- if server.message_queue.members is defined %}
 rabbit_hosts = {% for member in server.message_queue.members -%}
-                   {{ member.host }}:{{ member.get('port', 5672) }}
+                   {{ member.host }}:{{ member.get('port',rabbit_port) }}
                    {%- if not loop.last -%},{%- endif -%}
                {%- endfor -%}
 {%- else %}
 rabbit_host = {{ server.message_queue.host }}
-rabbit_port = {{ server.message_queue.port }}
+rabbit_port = {{ rabbit_port }}
+{%- endif %}
+
+{%- if server.message_queue.get('ssl',{}).get('enabled', False) %}
+rabbit_use_ssl=true
+
+{%- if server.message_queue.ssl.version is defined %}
+kombu_ssl_version = {{ server.message_queue.ssl.version }}
+{%- elif salt['grains.get']('pythonversion') > [2,7,8] %}
+kombu_ssl_version = TLSv1_2
+{%- endif %}
+
+kombu_ssl_ca_certs = {{ server.message_queue.ssl.get('cacert_file', server.cacert_file) }}
 {%- endif %}
 
 rabbit_userid = {{ server.message_queue.user }}

@@ -1,7 +1,13 @@
 neutron:
   server:
+    api_workers: 2
+    rpc_workers: 2
+    rpc_state_report_workers: 2
     enabled: true
     backend:
+      external_mtu: 1500
+      tenant_net_mtu: 9000
+      ironic_net_mtu: 9000
       engine: contrail
       #contrail_discovery_host
       host: 127.0.0.1
@@ -10,6 +16,12 @@ neutron:
       password: password
       token: token
       tenant: admin
+      physnets:
+        sriov_net:
+          mtu: 9000 # Optional, defaults to 1500
+          vlan_range: '100:200' # Optional
+        ext_net2:
+          mtu: 1500
     fwaas: false
     dns_domain: novalocal
     tunnel_type: vxlan

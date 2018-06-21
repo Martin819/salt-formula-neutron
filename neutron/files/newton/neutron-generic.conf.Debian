@@ -130,6 +130,9 @@ allow_overlapping_ips = True
 # this machine. All the agents and services running on this machine must use
 # the same host value. (string value)
 #host = example.domain
+{% if neutron.host is defined %}
+host = {{ neutron.host }}
+{% endif %}
 
 # Ensure that configured gateway is on subnet. For IPv6, validate only if
 # gateway is not a link local address. Deprecated, to be removed during the
@@ -178,6 +181,7 @@ advertise_mtu = True
 # value. Defaults to 1500, the standard value for Ethernet. (integer value)
 # Deprecated group/name - [ml2]/segment_mtu
 #global_physnet_mtu = 1500
+global_physnet_mtu = {{ neutron.get('global_physnet_mtu', '1500') }}
 
 # Number of backlog requests to configure the socket with (integer value)
 #backlog = 4096
@@ -518,26 +522,27 @@ executor_thread_pool_size = 70
 
 # Seconds to wait for a response from a call. (integer value)
 #rpc_response_timeout = 60
-rpc_response_timeout=60
+rpc_response_timeout=120
 
 # A URL representing the messaging driver to use and its full configuration. If
 # not set, we fall back to the rpc_backend option and driver specific
 # configuration. (string value)
 #transport_url = <None>
+
+{%- set rabbit_port = neutron.message_queue.get('port', 5671 if neutron.message_queue.get('ssl',{}).get('enabled', False)  else 5672) %}
 {%- if neutron.message_queue.members is defined %}
 transport_url = rabbit://{% for member in neutron.message_queue.members -%}
-                             {{ neutron.message_queue.user }}:{{ neutron.message_queue.password }}@{{ member.host }}:{{ member.get('port', 5672) }}
+                             {{ neutron.message_queue.user }}:{{ neutron.message_queue.password }}@{{ member.host }}:{{ member.get('port',rabbit_port) }}
                              {%- if not loop.last -%},{%- endif -%}
                          {%- endfor -%}
                              /{{ neutron.message_queue.virtual_host }}
 {%- else %}
-transport_url = rabbit://{{ neutron.message_queue.user }}:{{ neutron.message_queue.password }}@{{ neutron.message_queue.host }}:{{ neutron.message_queue.port }}/{{ neutron.message_queue.virtual_host }}
+transport_url = rabbit://{{ neutron.message_queue.user }}:{{ neutron.message_queue.password }}@{{ neutron.message_queue.host }}:{{ rabbit_port }}/{{ neutron.message_queue.virtual_host }}
 {%- endif %}
 
 # The messaging driver to use, defaults to rabbit. Other drivers include amqp
 # and zmq. (string value)
 #rpc_backend = rabbit
-rpc_backend = rabbit
 
 # The default exchange under which topics are scoped. May be overridden by an
 # exchange name specified in the transport_url option. (string value)
@@ -593,7 +598,7 @@ root_helper = sudo /usr/bin/neutron-rootwrap /etc/neutron/rootwrap.conf
 #use_helper_for_ns_read = true
 
 # Root helper daemon application to use when possible. (string value)
-#root_helper_daemon = <None>
+root_helper_daemon = sudo neutron-rootwrap-daemon /etc/neutron/rootwrap.conf
 
 # Seconds between nodes reporting state to server; should be less than
 # agent_down_time, best if it is half or less than agent_down_time. (floating
@@ -1216,6 +1221,18 @@ driver = messagingv2
 # From oslo.messaging
 #
 
+{%- if neutron.message_queue.get('ssl',{}).get('enabled', False) %}
+rabbit_use_ssl=true
+
+{%- if neutron.message_queue.ssl.version is defined %}
+kombu_ssl_version = {{ neutron.message_queue.ssl.version }}
+{%- elif salt['grains.get']('pythonversion') > [2,7,8] %}
+kombu_ssl_version = TLSv1_2
+{%- endif %}
+
+kombu_ssl_ca_certs = {{ neutron.message_queue.ssl.get('cacert_file', neutron.cacert_file) }}
+{%- endif %}
+
 # Use durable queues in AMQP. (boolean value)
 # Deprecated group/name - [DEFAULT]/amqp_durable_queues
 # Deprecated group/name - [DEFAULT]/rabbit_durable_queues
@@ -1316,7 +1333,6 @@ rabbit_retry_backoff = 2
 # count). (integer value)
 # Deprecated group/name - [DEFAULT]/rabbit_max_retries
 #rabbit_max_retries = 0
-rabbit_max_retries = 0
 
 # Try to use HA queues in RabbitMQ (x-ha-policy: all). If you change this
 # option, you must wipe the RabbitMQ database. In RabbitMQ 3.0, queue mirroring

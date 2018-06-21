@@ -1,60 +1,147 @@
+{%- set default_params = {
+    'cacert_file': salt['grains.filter_by']({
+        'Debian': '/etc/ssl/certs/ca-certificates.crt',
+        'RedHat': '/etc/pki/tls/certs/ca-bundle.crt'
+    })}
+%}
 
 {% set compute = salt['grains.filter_by']({
+    'BaseDefaults': default_params,
     'Debian': {
         'pkgs': ['neutron-openvswitch-agent', 'openvswitch-switch', 'python-pycadf'],
+        'pkgs_ovn': ['ovn-common', 'ovn-host'],
+        'pkgs_bagpipe': ['python-networking-bagpipe'],
         'services': ['neutron-openvswitch-agent'],
+        'services_ovn': ['ovn-host'],
         'dpdk': false,
+        'notification': {},
         'audit': {
           'enabled': false
-        }
+        },
+        'logging': {
+          'log_appender': false,
+          'log_handlers': {
+            'watchedfile': {
+              'enabled': true
+            }
+          },
+        },
     },
     'RedHat': {
         'pkgs': ['openstack-neutron-openvswitch', 'openvswitch', 'python-pycadf'],
+        'pkgs_ovn': ['openvswitch-ovn'],
+        'pkgs_bagpipe': ['python-networking-bagpipe'],
         'services': ['neutron-openvswitch-agent'],
+        'services_ovn': ['ovn-host'],
         'dpdk': false,
+        'notification': {},
         'audit': {
           'enabled': false
-        }
+        },
+        'logging': {
+          'log_appender': false,
+          'log_handlers': {
+            'watchedfile': {
+              'enabled': true
+            }
+          },
+        },
     },
-}, merge=pillar.neutron.get('compute', {})) %}
+}, merge=pillar.neutron.get('compute', {}), base='BaseDefaults') %}
+
+{%- set opendaylight_enabled = pillar.neutron.gateway is defined and pillar.neutron.gateway.opendaylight is defined %}
+{%- set pkgs_list = ['neutron-dhcp-agent', 'openvswitch-common', 'neutron-metadata-agent'] %}
+{%- set services_list = ['neutron-metadata-agent', 'neutron-dhcp-agent'] %}
+{%- if not opendaylight_enabled %}
+{%- do pkgs_list.extend(['neutron-openvswitch-agent', 'neutron-l3-agent']) %}
+{%- do services_list.extend(['neutron-openvswitch-agent', 'neutron-l3-agent']) %}
+{%- endif %}
 
 {% set gateway = salt['grains.filter_by']({
+    'BaseDefaults': default_params,
     'Debian': {
-        'pkgs': ['neutron-dhcp-agent', 'neutron-openvswitch-agent', 'neutron-l3-agent', 'openvswitch-common', 'neutron-metadata-agent'],
-        'services': ['neutron-openvswitch-agent', 'neutron-metadata-agent', 'neutron-l3-agent', 'neutron-dhcp-agent'],
-        'dpdk': false
+        'pkgs': pkgs_list,
+        'pkgs_l2gw_agent': ['neutron-l2gateway-agent'],
+        'services': services_list,
+        'dpdk': false,
+        'notification': {},
+        'logging': {
+          'log_appender': false,
+          'log_handlers': {
+            'watchedfile': {
+              'enabled': true
+            }
+          },
+        },
     },
     'RedHat': {
         'pkgs': ['openstack-neutron-openvswitch'],
-        'services': ['neutron-openvswitch-agent', 'neutron-metadata-agent', 'neutron-l3-agent', 'neutron-dhcp-agent'],
-        'dpdk': false
+        'pkgs_l2gw_agent': ['openstack-neutron-l2gw-agent'],
+        'services': services_list,
+        'dpdk': false,
+        'notification': {},
+        'logging': {
+          'log_appender': false,
+          'log_handlers': {
+            'watchedfile': {
+              'enabled': true
+            }
+          },
+        },
     },
-}, merge=pillar.neutron.get('gateway', {})) %}
+}, merge=pillar.neutron.get('gateway', {}), base='BaseDefaults') %}
 
 {% set server = salt['grains.filter_by']({
+    'BaseDefaults': default_params,
     'Debian': {
         'pkgs': ['neutron-server','python-neutron-lbaas', 'gettext-base', 'python-pycadf'],
+        'pkgs_ovn': ['python-networking-ovn', 'ovn-common', 'ovn-central'],
         'pkgs_ml2': ['neutron-plugin-ml2'],
+        'pkgs_l2gw': ['python-networking-l2gw'],
+        'pkgs_bgpvpn': ['python-networking-bgpvpn'],
+        'pkgs_bagpipe': ['python-networking-bagpipe'],
         'services': ['neutron-server'],
-        'notification': False,
+        'services_ovn': ['ovn-central'],
+        'notification': {},
         'dpdk': false,
         'cors': {},
         'audit': {
           'enabled': false
-        }
+        },
+        'logging': {
+          'log_appender': false,
+          'log_handlers': {
+            'watchedfile': {
+              'enabled': true
+            }
+          },
+        },
     },
     'RedHat': {
         'pkgs_ml2': ['openstack-neutron-ml2', 'python-pycadf'],
         'pkgs': ['openstack-neutron'],
+        'pkgs_ovn': ['openvswitch-ovn', 'python-networking-ovn'],
+        'pkgs_l2gw': ['python2-networking-l2gw'],
+        'pkgs_bgpvpn': ['python-networking-bgpvpn'],
+        'pkgs_bagpipe': ['python-networking-bagpipe'],
         'services': ['neutron-server'],
-        'notification': False,
+        'services_ovn': ['ovn-central'],
+        'notification': {},
         'dpdk': false,
         'cors': {},
         'audit': {
           'enabled': false
-        }
+        },
+        'logging': {
+          'log_appender': false,
+          'log_handlers': {
+            'watchedfile': {
+              'enabled': true
+            }
+          },
+        },
     },
-}, merge=pillar.neutron.get('server', {})) %}
+}, merge=pillar.neutron.get('server', {}), base='BaseDefaults') %}
 
 {% set client = salt['grains.filter_by']({
     'Debian': {
@@ -65,21 +152,29 @@
     },
 }, merge=pillar.neutron.get('client', {})) %}
 
-{%- if pillar.neutron.server is defined %}
+{% set fwaas = salt['grains.filter_by']({
+    'default': {
+        'v1': {
+            'driver': 'iptables',
+            'l3_extension': 'fwaas',
+            'service_plugin': 'firewall',
+        },
+        'v2': {
+            'driver': 'iptables_v2',
+            'l3_extension': 'fwaas_v2',
+            'service_plugin': 'firewall_v2',
+        },
+        'pkgs': ['python-neutron-fwaas'],
+        'api_version': 'v1',
+    },
+}, merge=pillar.neutron.get('fwaas', {}), base='default') %}
 
-{%- set tmp_server = pillar.neutron.server %}
 
-{%- if not tmp_server.backend is defined %}
-
-{%- if pillar.opencontrail is defined and tmp_server.plugin == "contrail" %}
-
-{%- from "opencontrail/map.jinja" import config with context %}
-
-{%- set backend = {'engine': tmp_server.plugin, 'host': config.discovery.host, 'token': config.identity.token, 'user': config.identity.user, 'password': config.identity.password, 'tenant': config.identity.tenant} %}
-{%- set tmp = server.update({'backend': backend}) %}
-
-{%- endif %}
-
-{%- endif %}
-
-{%- endif %}
+{% set monitoring = salt['grains.filter_by']({
+    'default': {
+        'error_log_rate': 0.2,
+        'endpoint_failed_major_threshold': 0.5,
+        'agents_failed_minor_threshold': 0.3,
+        'agents_failed_major_threshold': 0.6,
+    },
+}, grain='os_family', merge=salt['pillar.get']('neutron:monitoring')) %}

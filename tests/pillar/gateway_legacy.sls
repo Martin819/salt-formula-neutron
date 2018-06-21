@@ -1,6 +1,7 @@
 neutron:
   gateway:
     agent_mode: legacy
+    dhcp_lease_duration: 86400
     backend:
       engine: ml2
       tenant_network_types: "flat,vxlan"
@@ -21,4 +22,5 @@ neutron:
     metadata:
       host: 127.0.0.1
       password: password
+      workers: 2
     version: mitaka

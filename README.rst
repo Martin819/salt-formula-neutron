@@ -8,7 +8,7 @@ nova).
 
 Starting in the Folsom release, Neutron is a core and supported part of the
 OpenStack platform (for Essex, we were an "incubated" project, which means use
-is suggested only for those who really know what they're doing with Neutron). 
+is suggested only for those who really know what they're doing with Neutron).
 
 Sample Pillars
 ==============
@@ -23,6 +23,11 @@ Neutron Server on the controller node
         version: mitaka
         allow_pagination: true
         pagination_max_limit: 100
+        api_workers: 2
+        rpc_workers: 2
+        rpc_state_report_workers: 2
+        root_helper_daemon: false
+        dhcp_lease_duration: 600
         bind:
           address: 172.20.0.1
           port: 9696
@@ -52,6 +57,7 @@ Neutron Server on the controller node
           host: 127.0.0.1
           port: 8775
           password: pass
+          workers: 2
         audit:
           enabled: false
 
@@ -73,7 +79,8 @@ Configuration of policy.json file
           # Add key without value to remove line from policy.json
           'create_network:shared':
 
-Neutron lbaas provides on the controller node
+Neutron LBaaSv2 enablement
+--------------------------
 
 .. code-block:: yaml
 
@@ -82,9 +89,13 @@ Neutron lbaas provides on the controller node
       lbaas:
         enabled: true
         providers:
+          octavia:
+            engine: octavia
+            driver_path: 'neutron_lbaas.drivers.octavia.driver.OctaviaDriver'
+            base_url: 'http://127.0.0.1:9876'
           avi_adc:
-            enabled: true
             engine: avinetworks
+            driver_path: 'avi_lbaasv2.avi_driver.AviDriver'
             controller_address: 10.182.129.239
             controller_user: admin
             controller_password: Cloudlab2016
@@ -93,17 +104,31 @@ Neutron lbaas provides on the controller node
             engine: avinetworks
             ...
 
-Note: If you want contrail lbaas then backend is only required. Lbaas in
-pillar should be define only if it should be disabled.
+Note: If the Contrail backend is set, Opencontrail loadbalancer would be enabled
+automatically. In this case lbaas should disabled in pillar:
 
 .. code-block:: yaml
 
   neutron:
     server:
       lbaas:
-        enabled: disabled
+        enabled: false
+
+
+Neutron FWaaSv1 enablement
+--------------------------
+
+.. code-block:: yaml
+
+  neutron:
+    fwaas:
+      enabled: true
+      version: ocata
+      api_version: v1
+
 
 Enable CORS parameters
+----------------------
 
 .. code-block:: yaml
 
@@ -125,11 +150,11 @@ With DVR for East-West and Network node for North-South.
 
 This use case describes a model utilising VxLAN overlay with DVR. The DVR
 routers will only be utilized for traffic that is router within the cloud
-infrastructure and that remains encapsulated. External traffic will be 
-routed to via the network nodes. 
+infrastructure and that remains encapsulated. External traffic will be
+routed to via the network nodes.
 
-The intention is that each tenant will require at least two (2) vrouters 
-one to be utilised 
+The intention is that each tenant will require at least two (2) vrouters
+one to be utilised
 
 Neutron Server
 
@@ -138,7 +163,7 @@ Neutron Server
     neutron:
       server:
         version: mitaka
-        plugin: ml2
+        path_mtu: 1500
         bind:
           address: 172.20.0.1
           port: 9696
@@ -183,6 +208,7 @@ Network Node
       gateway:
         enabled: True
         version: mitaka
+        dhcp_lease_duration: 600
         message_queue:
           engine: rabbitmq
           host: 127.0.0.1
@@ -201,7 +227,7 @@ Network Node
           tenant_network_types: "flat,vxlan"
           mechanism:
             ovs:
-              driver: openvswitch  
+              driver: openvswitch
 
 Compute Node
 
@@ -224,7 +250,7 @@ Compute Node
         external_access: false # Compute node with DVR for east-west only, Network Node has True as default
         metadata:
           host: 127.0.0.1
-          password: pass       
+          password: pass
         backend:
           engine: ml2
           tenant_network_types: "flat,vxlan"
@@ -234,6 +260,84 @@ Compute Node
         audit:
           enabled: false
 
+
+Disable physnet1 bridge
+-----------------------
+
+By default we have external access turned on, so among any physnets in
+your reclass there would be additional one: physnet1, which is mapped to
+br-floating
+
+If you need internal nets only without this bridge, remove br-floating
+and configurations mappings. Disable mappings for this bridge on
+neutron-servers:
+
+.. code-block:: yaml
+
+    neutron:
+      server:
+        external_access: false
+
+gateways:
+
+.. code-block:: yaml
+
+    neutron:
+      gateway:
+        external_access: false
+
+compute nodes:
+
+.. code-block:: yaml
+
+    neutron:
+      compute:
+        external_access: false
+
+
+Add additional bridge mappings for OVS bridges
+----------------------------------------------
+
+By default we have external access turned on, so among any physnets in
+your reclass there would be additional one: physnet1, which is mapped to
+br-floating
+
+If you need to add extra non-default bridge mappings they can be defined
+separately for both gateways and compute nodes:
+
+gateways:
+
+.. code-block:: yaml
+
+    neutron:
+      gateway:
+        bridge_mappings:
+          physnet4: br-floating-internet
+
+compute nodes:
+
+.. code-block:: yaml
+
+    neutron:
+      compute:
+        bridge_mappings:
+          physnet4: br-floating-internet
+
+
+Specify different mtu values for different physnets
+---------------------------------------------------
+
+Neutron Server
+
+.. code-block:: yaml
+
+    neutron:
+      server:
+        version: mitaka
+        backend:
+          external_mtu: 1500
+          tenant_net_mtu: 9000
+          ironic_net_mtu: 9000
 
 Neutron VXLAN tenant networks with Network Nodes (non DVR)
 ----------------------------------------------------------
@@ -248,7 +352,6 @@ Neutron Server
     neutron:
       server:
         version: mitaka
-        plugin: ml2
         bind:
           address: 172.20.0.1
           port: 9696
@@ -312,7 +415,7 @@ Network Node
           tenant_network_types: "flat,vxlan"
           mechanism:
             ovs:
-              driver: openvswitch  
+              driver: openvswitch
 
 Compute Node
 
@@ -331,7 +434,7 @@ Compute Node
           virtual_host: '/openstack'
         local_ip: 192.168.20.20 # br-mesh ip address
         external_access: False
-        dvr: False      
+        dvr: False
         backend:
           engine: ml2
           tenant_network_types: "flat,vxlan"
@@ -344,8 +447,8 @@ Neutron VXLAN tenant networks with Network Nodes with DVR
 
 With DVR for East-West and North-South, DVR everywhere, Network node for SNAT.
 
-This section describes a network solution that utilises VxLAN 
-overlay networks with DVR with North-South and East-West. Network 
+This section describes a network solution that utilises VxLAN
+overlay networks with DVR with North-South and East-West. Network
 Node is used only for SNAT.
 
 Neutron Server
@@ -355,7 +458,6 @@ Neutron Server
     neutron:
       server:
         version: mitaka
-        plugin: ml2
         bind:
           address: 172.20.0.1
           port: 9696
@@ -419,7 +521,7 @@ Network Node
           tenant_network_types: "flat,vxlan"
           mechanism:
             ovs:
-              driver: openvswitch  
+              driver: openvswitch
 
 Compute Node
 
@@ -438,7 +540,7 @@ Compute Node
           virtual_host: '/openstack'
         local_ip: 192.168.20.20 # br-mesh ip address
         dvr: True
-        external_access: True     
+        external_access: True
         agent_mode: dvr
         availability_zone: az1
         metadata:
@@ -514,6 +616,22 @@ Sample Linux network configuration for DVR
             use_ovs_ports:
             - float-to-ex
 
+Additonal VXLAN tenant network settings
+---------------------------------------
+
+The default multicast group of 224.0.0.1 only multicasts to a single subnet.
+Allow overriding it to allow larger underlay network topologies.
+
+Neutron Server
+
+.. code-block:: yaml
+
+    neutron:
+      server:
+        vxlan:
+          group: 239.0.0.0/8
+          vni_ranges: "2:65535"
+
 Neutron VLAN tenant networks with Network Nodes
 -----------------------------------------------
 
@@ -526,7 +644,6 @@ Neutron Server only
     neutron:
       server:
         version: mitaka
-        plugin: ml2
         ...
         global_physnet_mtu: 9000
         l3_ha: False
@@ -548,7 +665,6 @@ Compute node
     neutron:
       compute:
         version: mitaka
-        plugin: ml2
         ...
         dvr: True
         agent_mode: dvr
@@ -560,7 +676,35 @@ Compute node
             ovs:
               driver: openvswitch
 
+Neutron with additional physical networks
+-----------------------------------------
+
+Neutron Server only
+
+.. code-block:: yaml
+
+    neutron:
+      server:
+        version: ocata
+        ...
+        backend:
+          engine: ml2
+          tenant_network_types: "flat,vlan" # Can be mixed flat,vlan,vxlan
+          ...
+          # also need to configure corresponding additional bridge_mappings on
+          # compute and gateway nodes
+          physnets:
+            sriov_net:
+              mtu: 9000 # Optional, defaults to 1500
+              vlan_range: '100:200' # Optional
+            ext_net2:
+              mtu: 1500
+          mechanism:
+            ovs:
+              driver: openvswitch
+
 Advanced Neutron Features (DPDK, SR-IOV)
+----------------------------------------
 
 Neutron OVS DPDK
 
@@ -578,8 +722,9 @@ Enable datapath netdev for neutron openvswitch agent
     neutron:
       compute:
         version: mitaka
-        plugin: ml2
         dpdk: True
+        vhost_mode: client # options: client|server (default)
+        vhost_socket_dir: /var/run/openvswitch
         backend:
           engine: ml2
           ...
@@ -594,7 +739,6 @@ Neutron OVS SR-IOV
     neutron:
       server:
         version: mitaka
-        plugin: ml2
         backend:
           engine: ml2
           ...
@@ -607,7 +751,6 @@ Neutron OVS SR-IOV
     neutron:
       compute:
         version: mitaka
-        plugin: ml2
         ...
         backend:
           engine: ml2
@@ -620,6 +763,180 @@ Neutron OVS SR-IOV
             ovs:
               driver: openvswitch
 
+Neutron with VLAN-aware-VMs
+---------------------------
+
+.. code-block:: yaml
+
+    neutron:
+      server:
+        vlan_aware_vms: true
+      ....
+      compute:
+        vlan_aware_vms: true
+      ....
+      gateway:
+        vlan_aware_vms: true
+
+Neutron with BGP VPN (BaGPipe driver)
+---------------------------
+
+.. code-block:: yaml
+
+    neutron:
+      server:
+        version: pike
+        bgp_vpn:
+          enabled: true
+          driver: bagpipe # Options: bagpipe/opencontrail/opendaylight
+      ....
+      compute:
+        version: pike
+        bgp_vpn:
+          enabled: true
+          driver: bagpipe # Options: bagpipe/opencontrail/opendaylight
+          bagpipe:
+            local_address: 192.168.20.20 # IP address for mpls/gre tunnels
+            peers: 192.168.20.30 # IP addresses of BGP peers
+            autonomous_system: 64512 # Autonomous System number
+            enable_rtc: True # Enable RT Constraint (RFC4684)
+        backend:
+          ovs_extension: # for OVS agent only, not supported in SRIOV agent
+            bagpipe_bgpvpn:
+              enabled: True
+
+Neutron with DHCP agent on compute node
+---------------------------------------
+
+.. code-block:: yaml
+
+    neutron:
+      ....
+      compute:
+        dhcp_agent_enabled: true
+      ....
+
+Neutron with OVN
+----------------
+
+Control node:
+
+.. code-block:: yaml
+
+    neutron:
+      server:
+        backend:
+          engine: ovn
+          mechanism:
+            ovn:
+              driver: ovn
+          tenant_network_types: "geneve,flat"
+        ovn_ctl_opts:
+          db-nb-create-insecure-remote: 'yes'
+          db-sb-create-insecure-remote: 'yes'
+
+Compute node:
+
+.. code-block:: yaml
+
+    neutron:
+      compute:
+        local_ip: 10.2.0.105
+        controller_vip: 10.1.0.101
+        external_access: false
+        backend:
+          engine: ovn
+
+
+Neutron L2 Gateway
+----------------
+
+Control node:
+
+.. code-block:: yaml
+
+    neutron:
+      server:
+        version: pike
+        l2gw:
+          enabled: true
+          periodic_monitoring_interval: 5
+          quota_l2_gateway: 20
+          # service_provider=<service_type>:<name>:<driver>[:default]
+          service_provider: L2GW:OpenDaylight:networking_odl.l2gateway.driver.OpenDaylightL2gwDriver:default
+        backend:
+          engine: ml2
+
+Network/Gateway node:
+
+.. code-block:: yaml
+
+    neutron:
+      gateway:
+        version: pike
+        l2gw:
+          enabled: true
+          debug: true
+          socket_timeout: 20
+          ovsdb_hosts:
+            # <ovsdb_name>: <ip address>:<port>
+            # - ovsdb_name: a user defined symbolic identifier of physical switch
+            # - ip address: the address or dns name for the OVSDB server (i.e. pointer to the switch)
+            ovsdb1: 10.164.5.33:6632
+            ovsdb2: 10.164.4.33:6632
+
+
+OpenDaylight integration
+------------------------
+
+Control node:
+
+.. code-block:: yaml
+
+  neutron:
+    server:
+      backend:
+        opendaylight: true
+        router: odl-router_v2
+        host: 10.20.0.77
+        rest_api_port: 8282
+        user: admin
+        password: admin
+        ovsdb_connection: tcp:127.0.0.1:6639
+        enable_websocket: true
+        enable_dhcp_service: false
+        mechanism:
+          ovs:
+            driver: opendaylight_v2
+
+Network/Gateway node:
+
+.. code-block:: yaml
+
+  neutron:
+    gateway:
+      backend:
+        router: odl-router_v2
+        ovsdb_connection: tcp:127.0.0.1:6639
+      opendaylight:
+        ovsdb_server_iface: ptcp:6639:127.0.0.1
+        ovsdb_odl_iface: tcp:10.20.0.77:6640
+        tunnel_ip: 10.1.0.110
+        provider_mappings: physnet1:br-floating
+
+Compute node:
+
+.. code-block:: yaml
+
+  neutron:
+    compute:
+      opendaylight:
+        ovsdb_server_iface: ptcp:6639:127.0.0.1
+        ovsdb_odl_iface: tcp:10.20.0.77:6640
+        tunnel_ip: 10.1.0.105
+        provider_mappings: physnet1:br-floating
+
+
 Neutron Server
 --------------
 
@@ -629,7 +946,6 @@ Neutron Server with OpenContrail
 
     neutron:
       server:
-        plugin: contrail
         backend:
           engine: contrail
           host: contrail_discovery_host
@@ -651,7 +967,6 @@ Neutron Server with Midonet
           port: 8181
           user: admin
           password: password
-
 
 Neutron Keystone region
 
@@ -687,6 +1002,53 @@ Client-side RabbitMQ HA setup
           virtual_host: '/openstack'
         ....
 
+
+Configuring TLS communications
+------------------------------
+
+
+**Note:** by default system wide installed CA certs are used, so ``cacert_file`` param is optional, as well as ``cacert``.
+
+
+- **RabbitMQ TLS**
+
+.. code-block:: yaml
+
+ neutron:
+   server, gateway, compute:
+      message_queue:
+        port: 5671
+        ssl:
+          enabled: True
+          (optional) cacert: cert body if the cacert_file does not exists
+          (optional) cacert_file: /etc/openstack/rabbitmq-ca.pem
+          (optional) version: TLSv1_2
+
+
+- **MySQL TLS**
+
+.. code-block:: yaml
+
+ neutron:
+   server:
+      database:
+        ssl:
+          enabled: True
+          (optional) cacert: cert body if the cacert_file does not exists
+          (optional) cacert_file: /etc/openstack/mysql-ca.pem
+
+- **Openstack HTTPS API**
+
+
+.. code-block:: yaml
+
+ neutron:
+   server:
+      identity:
+         protocol: https
+         (optional) cacert_file: /etc/openstack/proxy.pem
+
+
 Enable auditing filter, ie: CADF
 
 .. code-block:: yaml
@@ -706,6 +1068,20 @@ Enable auditing filter, ie: CADF
           filter_factory: 'keystonemiddleware.audit:filter_factory'
           map_file: '/etc/pycadf/neutron_api_audit_map.conf'
       ....
+
+Neutron with security groups disabled
+
+.. code-block:: yaml
+
+    neutron:
+      server:
+        security_groups_enabled: False
+      ....
+      compute:
+        security_groups_enabled: False
+      ....
+      gateway:
+        security_groups_enabled: False
 
 
 Neutron Client
@@ -833,6 +1209,146 @@ Floating IP addresses
 
 .. note:: The network must have flag router:external set to True.
           Instance port in the stated subnet will be associated with the dynamically generated floating IP.
+
+
+
+Enable Neutron extensions (QoS, DNS, etc.)
+------------------------------------------
+.. code-block:: yaml
+
+    neutron:
+      server:
+        backend:
+          extension:
+            dns:
+              enabled: True
+              host: 127.0.0.1
+              port: 9001
+              protocol: http
+              ....
+            qos
+              enabled: True
+
+Different Neutron extensions for different agents
+-------------------------------------------------
+.. code-block:: yaml
+
+    neutron:
+      server:
+        backend:
+          extension: # common extensions for OVS and SRIOV agents
+            dns:
+              enabled: True
+              ...
+            qos
+              enabled: True
+          ovs_extension: # OVS specific extensions
+            bagpipe_bgpvpn:
+              enabled: True
+          sriov_extension: # SRIOV specific extensions
+            dummy:
+              enabled: True
+
+
+Neutron with Designate
+-----------------------------------------
+.. code-block:: yaml
+
+    neutron:
+      server:
+        backend:
+          extension:
+            dns:
+              enabled: True
+              host: 127.0.0.1
+              port: 9001
+              protocol: http
+
+Enable RBAC for OpenContrail engine
+-----------------------------------
+.. code-block:: yaml
+
+    neutron:
+      server:
+        backend:
+          engine: contrail
+          rbac:
+            enabled: True
+
+Enhanced logging with logging.conf
+----------------------------------
+
+By default logging.conf is disabled.
+
+That is possible to enable per-binary logging.conf with new variables:
+  * openstack_log_appender - set it to true to enable log_config_append for all OpenStack services;
+  * openstack_fluentd_handler_enabled - set to true to enable FluentHandler for all Openstack services.
+  * openstack_ossyslog_handler_enabled - set to true to enable OSSysLogHandler for all Openstack services.
+
+Only WatchedFileHandler, OSSysLogHandler and FluentHandler are available.
+
+Also it is possible to configure this with pillar:
+
+.. code-block:: yaml
+
+  neutron:
+    server:
+      logging:
+        log_appender: true
+        log_handlers:
+          watchedfile:
+            enabled: true
+          fluentd:
+            enabled: true
+          ossyslog:
+            enabled: true
+    ....
+    compute:
+      logging:
+        log_appender: true
+        log_handlers:
+          watchedfile:
+            enabled: true
+          fluentd:
+            enabled: true
+          ossyslog:
+            enabled: true
+    ....
+    gateway:
+      logging:
+        log_appender: true
+        log_handlers:
+          watchedfile:
+            enabled: true
+          fluentd:
+            enabled: true
+          ossyslog:
+            enabled: true
+
+Logging levels pillar example:
+
+.. code-block:: yaml
+
+  neutron:
+    server:
+      logging:
+        log_appender: true
+        loggers:
+          root:
+            level: 'DEBUG'
+          neutron:
+            level: 'DEBUG'
+          amqplib:
+            level: 'DEBUG'
+          sqlalchemy:
+            level: 'DEBUG'
+          boto:
+            level: 'DEBUG'
+          suds:
+            level: 'DEBUG'
+          eventletwsgi:
+            level: 'DEBUG'
+    ......
 
 
 Documentation and Bugs

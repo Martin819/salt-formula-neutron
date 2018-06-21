@@ -41,19 +41,9 @@ def _autheticate(func_name):
                 connection_args.update({kwarg: kwargs[kwarg]})
             elif '__' not in kwarg:
                 nkwargs.update({kwarg: kwargs[kwarg]})
-        kstone = __salt__['keystone.auth'](**connection_args)
-        token = kstone.auth_token
-
-        if kwargs.get('connection_endpoint_type') == None:
-            endpoint_type = 'internalURL'
-        else:
-            endpoint_type = kwargs.get('connection_endpoint_type')
-
-        endpoint = kstone.service_catalog.url_for(
-            service_type='network',
-            endpoint_type=endpoint_type)
-        neutron_interface = client.Client(
-            endpoint_url=endpoint, token=token)
+        kstone = __salt__['keystoneng.auth'](**connection_args)
+        endpoint_type = kwargs.get('connection_endpoint_type', 'internal')
+        neutron_interface = client.Client(session=kstone.session, endpoint_type=endpoint_type)
         return_data = func_name(neutron_interface, *args, **nkwargs)
         # TODO(vsaienko) drop this formatting when all commands are updated
         # to return dictionary
@@ -328,9 +318,7 @@ def create_port(neutron_interface, **port_params):
     .. code-block:: bash
         salt '*' neutronng.create_port network_id='openstack-network-id'
     '''
-    response = neutron_interface.create_port({'port': port_params})
-    if 'port' in response and 'id' in response['port']:
-        return response['port']['id']
+    return neutron_interface.create_port({'port': port_params})
 
 
 @_autheticate
@@ -418,3 +406,13 @@ def delete_router(neutron_interface, router_id):
     '''
     neutron_interface.delete_router(router_id)
 
+
+@_autheticate
+def list_extensions(neutron_interface, **kwargs):
+    '''
+    list all extensions
+    CLI Example:
+    .. code-block:: bash
+        salt '*' neutronng.list_extensions
+    '''
+    return neutron_interface.list_extensions(**kwargs)

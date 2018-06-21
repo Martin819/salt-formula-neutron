@@ -130,6 +130,9 @@ allow_overlapping_ips = True
 # this machine. All the agents and services running on this machine must use
 # the same host value. (string value)
 #host = example.domain
+{% if neutron.host is defined %}
+host = {{ neutron.host }}
+{% endif %}
 
 # Ensure that configured gateway is on subnet. For IPv6, validate only if
 # gateway is not a link local address. Deprecated, to be removed during the
@@ -178,6 +181,7 @@ advertise_mtu = True
 # value. Defaults to 1500, the standard value for Ethernet. (integer value)
 # Deprecated group/name - [ml2]/segment_mtu
 #global_physnet_mtu = 1500
+global_physnet_mtu = {{ neutron.get('global_physnet_mtu', '1500') }}
 
 # Number of backlog requests to configure the socket with (integer value)
 #backlog = 4096
@@ -518,7 +522,7 @@ executor_thread_pool_size = 70
 
 # Seconds to wait for a response from a call. (integer value)
 #rpc_response_timeout = 60
-rpc_response_timeout=60
+rpc_response_timeout=120
 
 # A URL representing the messaging driver to use and its full configuration. If
 # not set, we fall back to the rpc_backend option and driver specific
@@ -584,7 +588,7 @@ root_helper = sudo /usr/bin/neutron-rootwrap /etc/neutron/rootwrap.conf
 #use_helper_for_ns_read = true
 
 # Root helper daemon application to use when possible. (string value)
-#root_helper_daemon = <None>
+root_helper_daemon = sudo neutron-rootwrap-daemon /etc/neutron/rootwrap.conf
 
 # Seconds between nodes reporting state to server; should be less than
 # agent_down_time, best if it is half or less than agent_down_time. (floating
@@ -1268,14 +1272,27 @@ driver = messagingv2
 # Deprecated group/name - [DEFAULT]/rabbit_hosts
 #rabbit_hosts = $rabbit_host:$rabbit_port
 #
+{%- set rabbit_port = neutron.message_queue.get('port', 5671 if neutron.message_queue.get('ssl',{}).get('enabled', False)  else 5672) %}
 {%- if neutron.message_queue.members is defined %}
 rabbit_hosts = {% for member in neutron.message_queue.members -%}
-                   {{ member.host }}:{{ member.get('port', 5672) }}
+                   {{ member.host }}:{{ member.get('port',rabbit_port) }}
                    {%- if not loop.last -%},{%- endif -%}
                {%- endfor -%}
 {%- else %}
 rabbit_host = {{ neutron.message_queue.host }}
-rabbit_port = {{ neutron.message_queue.port }}
+rabbit_port = {{ rabbit_port }}
+{%- endif %}
+
+{%- if neutron.message_queue.get('ssl',{}).get('enabled', False) %}
+rabbit_use_ssl=true
+
+{%- if neutron.message_queue.ssl.version is defined %}
+kombu_ssl_version = {{ neutron.message_queue.ssl.version }}
+{%- elif salt['grains.get']('pythonversion') > [2,7,8] %}
+kombu_ssl_version = TLSv1_2
+{%- endif %}
+
+kombu_ssl_ca_certs = {{ neutron.message_queue.ssl.get('cacert_file', neutron.cacert_file) }}
 {%- endif %}
 
 rabbit_userid = {{ neutron.message_queue.user }}
